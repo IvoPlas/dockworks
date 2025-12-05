@@ -1,0 +1,167 @@
+services:
+  traefik_3-2:
+    build:
+      context: ./services/traefik/3-2
+      dockerfile: Dockerfile
+    container_name: dockworks_traefik_3-2
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - dockworks-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MySQL 8 - Database
+  mysql_8:
+    build:
+      context: ./services/mysql/8
+      dockerfile: Dockerfile
+    container_name: dockworks_mysql_8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - dockworks-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  minio_2024-10-13:
+    build:
+      context: ./services/minio/2024-10-13
+      dockerfile: Dockerfile
+    container_name: dockworks_minio_2024-10-13
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - dockworks-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      # MinIO API
+      - "traefik.http.routers.minio-api.rule=Host(`minio.localhost`)"
+      - "traefik.http.routers.minio-api.entrypoints=web"
+      - "traefik.http.routers.minio-api.service=minio-api"
+      - "traefik.http.services.minio-api.loadbalancer.server.port=9000"
+      # MinIO Console
+      - "traefik.http.routers.minio-console.rule=Host(`minio-console.localhost`)"
+      - "traefik.http.routers.minio-console.entrypoints=web"
+      - "traefik.http.routers.minio-console.service=minio-console"
+      - "traefik.http.services.minio-console.loadbalancer.server.port=9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Mailpit - Email Testing Tool
+  mailpit_1-21:
+    build:
+      context: ./services/mailpit/1-21
+      dockerfile: Dockerfile
+    container_name: dockworks_mailpit_1-21
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - dockworks-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailpit.rule=Host(`mailpit.localhost`)"
+      - "traefik.http.routers.mailpit.entrypoints=web"
+      - "traefik.http.services.mailpit.loadbalancer.server.port=8025"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8025/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # RabbitMQ 3 - Message Broker
+  rabbitmq_3:
+    build:
+      context: ./services/rabbitmq/3
+      dockerfile: Dockerfile
+    container_name: dockworks_rabbitmq_3
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rabbitmq}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-rabbitmq}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - dockworks-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rabbitmq.rule=Host(`rabbitmq.localhost`)"
+      - "traefik.http.routers.rabbitmq.entrypoints=web"
+      - "traefik.http.services.rabbitmq.loadbalancer.server.port=15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis 6 - In-Memory Data Store
+  redis_6:
+    build:
+      context: ./services/redis/6
+      dockerfile: Dockerfile
+    container_name: dockworks_redis_6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - dockworks-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  dockworks-network:
+    driver: bridge
+    name: dockworks-network
+
+volumes:
+  mysql_data:
+    driver: local
+  minio_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  redis_data:
+    driver: local
+
